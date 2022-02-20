@@ -3,7 +3,7 @@
 goioc 是一个基于 GO 语言编写的依赖注入框架，代码量不多，很简洁。
 
 ```bash
-go get -u https://github.com/whuanle/goioc
+go get -u https://github.com/whuanle/goioc v1.0
 ```
 
 
@@ -245,10 +245,44 @@ const (
 	obj1, _ := serviceProvider.GetService(imy)
 	obj2, _ := serviceProvider.GetService(imy)
 
-	fmt.Printf("obj1 = %p,obj2 = %p", (*obj1).(*Dog), (*obj2).(*Dog))
+	fmt.Printf("obj1 = %p,obj2 = %p\r\n", (*obj1).(*Dog), (*obj2).(*Dog))
 	if fmt.Sprintf("%p",(*obj1).(*Dog)) != fmt.Sprintf("%p",(*obj2).(*Dog)){
 		t.Error("两个对象不是同一个")
 	}
+```
+
+
+
+如果是单例模式(Singleton)，那么无论多少次 Build，对象始终是同一个：
+
+```go
+// 字段是接口
+type Animal1 struct {
+	Dog IAnimal `injection:"true"`
+}
+```
+
+```go
+	// Singleton
+	t1 := reflect.TypeOf((*Animal1)(nil)).Elem()
+	collection.AddSingleton(t1)
+
+	serviceProvider1 := collection.Build()
+	v1, _ := serviceProvider1.GetService(t1)
+
+	serviceProvider2 := collection.Build()
+	v2, _ := serviceProvider2.GetService(t1)
+
+	fmt.Printf("v1 = %p,v2 = %p\r\n", (*v1).(*Animal1), (*v2).(*Animal1))
+	if fmt.Sprintf("%p", (*v1).(*Animal1)) != fmt.Sprintf("%p", (*v2).(*Animal1)) {
+		t.Error("两个对象不是同一个")
+	}
+```
+
+输出结果：
+
+```
+v1 = 0xc0000886c0,v2 = 0xc0000886c0
 ```
 
 
@@ -295,3 +329,119 @@ animal := &Animal{
 
 
 
+### 接口、结构体、结构体指针
+
+在结构体注入时，可以对需要的字段进行自动实例化赋值，而字段可能有以下情况：
+
+```go
+// 字段是接口
+type Animal1 struct {
+	Dog IAnimal `injection:"true"`
+}
+
+// 字段是结构体
+type Animal2 struct {
+	Dog Dog `injection:"true"`
+}
+
+// 字段是结构体指针
+type Animal3 struct {
+	Dog *Dog `injection:"true"`
+}
+```
+
+
+
+首先注入前置的依赖对象：
+
+```go
+	// 获取 reflect.Type
+	imy := reflect.TypeOf((*IAnimal)(nil)).Elem()
+	my := reflect.TypeOf((*Dog)(nil)).Elem()
+
+	// 创建容器
+	var collection IServiceCollection = &ServiceCollection{}
+
+	// 注入服务，生命周期为 scoped
+	collection.AddScopedForm(imy, my)
+	collection.AddScoped(my)
+```
+
+
+
+然后将我们的一些对象注入进去：
+
+```go
+	t1 := reflect.TypeOf((*Animal1)(nil)).Elem()
+	t2 := reflect.TypeOf((*Animal2)(nil)).Elem()
+	t3 := reflect.TypeOf((*Animal3)(nil)).Elem()
+
+	collection.AddScoped(t1)
+	collection.AddScoped(t2)
+	collection.AddScoped(t3)
+```
+
+然后愉快地获取这些对象实例：
+
+```go
+	// 构建服务 Provider
+	serviceProvider := collection.Build()
+
+	v1, _ := serviceProvider.GetService(t1)
+	v2, _ := serviceProvider.GetService(t2)
+	v3, _ := serviceProvider.GetService(t3)
+
+	fmt.Println(*v1)
+	fmt.Println(*v2)
+	fmt.Println(*v3)
+```
+
+
+
+打印对象信息：
+
+```
+&{0x3abdd8}
+&{{}}
+&{0x3abdd8}
+```
+
+
+
+可以看到，当你注入实例后，结构体字段可以是接口、结构体或结构体指针，goioc 会根据不同的情况注入对应的实例。
+
+前面提到了对象是生命周期，这里有些地方需要注意。
+
+如果字段是接口和结构体指针，那么 scope 生命周期时，注入的对象是同一个，可以参考前面的 v1、v3 的 Dog 字段，Dog 字段类型虽然不同，但是因为可以存储指针，因此注入的对象是同一个。如果字段是结构体，由于 Go 语言中结构体是值类型，因此给值类型赋值是，是值赋值，因此对象不是同一个了。
+
+
+
+
+
+### 不会自动注入本身
+
+下面是一个依赖注入过程：
+
+```go
+	// 获取 reflect.Type
+	imy := reflect.TypeOf((*IAnimal)(nil)).Elem()
+	my := reflect.TypeOf((*Dog)(nil)).Elem()
+
+	// 创建容器
+	var collection IServiceCollection = &ServiceCollection{}
+
+	// 注入服务，生命周期为 scoped
+	collection.AddScopedForm(imy, my)
+```
+
+此时，注册的服务是 IAnimal，你只能通过 IAnimal 获取实例，无法通过 Dog 获取实例。
+
+如果你想获取 Dog，需要自行注入：
+
+```go
+	// 注入服务，生命周期为 scoped
+	collection.AddScopedForm(imy, my)
+	collection.AddScoped(my)
+```
+
+> 如果是结构体字段，则使用 IAnimal、Dog、`*Dog` 的形式都可以。

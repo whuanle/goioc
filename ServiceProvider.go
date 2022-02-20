@@ -6,12 +6,13 @@ import (
 )
 
 type ServiceProvider struct {
-	descriptors map[reflect.Type]ServiceDescriptor
+	descriptors       map[reflect.Type]ServiceDescriptor
+	serviceCollection *ServiceCollection
 }
 
 // GetService 获取对象实例
 func (s *ServiceProvider) GetService(baseType reflect.Type) (*interface{}, error) {
-	descriptor, ok := s.descriptors[baseType]
+	descriptor, ok := s.descriptors[baseType] // 改进一下，service 也行
 	if !ok {
 		return nil, fmt.Errorf("没有找到 %s 对应的实例", baseType.Name())
 	}
@@ -22,12 +23,35 @@ func (s *ServiceProvider) GetService(baseType reflect.Type) (*interface{}, error
 		obj = s.createObject(obj)
 		return &obj, nil
 	}
-	// descriptor.Lifetime == Scope || descriptor.Lifetime == Singleton
-	if descriptor.ServiceInstance == nil {
-		descriptor.ServiceInstance = s.createObject(descriptor.InitHandler())
+	// descriptor.Lifetime == Scope
+	if descriptor.Lifetime == Scope {
+		if descriptor.ServiceInstance == nil {
+			descriptor.ServiceInstance = s.createObject(descriptor.InitHandler())
+		}
+		return &descriptor.ServiceInstance, nil
 	}
 
-	return &descriptor.ServiceInstance, nil
+	// 如果是单例模式，则要找到原始的 collection ，实例化，每次都从 ServiceCollection 中取对象
+	if descriptor.Lifetime == Singleton {
+		serviceDescriptor, ok := s.serviceCollection.descriptors[baseType]
+		if !ok {
+			return nil, fmt.Errorf("未找到 %v 类型", baseType)
+		}
+		if serviceDescriptor.ServiceInstance == nil {
+			s.initSingleton(&serviceDescriptor, baseType)
+			s.serviceCollection.descriptors[baseType] = serviceDescriptor
+		}
+		return &serviceDescriptor.ServiceInstance, nil
+	}
+	panic("未知生命周期")
+}
+
+// 单例模式的延迟加载
+func (s *ServiceProvider) initSingleton(serviceDescriptor *ServiceDescriptor, baseType reflect.Type) {
+	if serviceDescriptor.Lifetime != Singleton {
+		panic(fmt.Sprintf("%v 的生命周期不是 Singleton", baseType.Name()))
+	}
+	serviceDescriptor.ServiceInstance = s.createObject(serviceDescriptor.InitHandler())
 }
 
 // createObject 结构体字段自动注入，
@@ -53,7 +77,12 @@ func (s *ServiceProvider) createObject(obj interface{}) interface{} {
 			continue
 		}
 		if tag == "true" {
-			value, err := s.GetService(t.Field(i).Type)
+			// 字段类型，如果字段类型是指针，则需要解开指针
+			fieldSourceType := field.Type
+			if fieldSourceType.Kind() == reflect.Ptr {
+				fieldSourceType = fieldSourceType.Elem()
+			}
+			value, err := s.GetService(fieldSourceType)
 			if err != nil {
 				panic(err)
 			}

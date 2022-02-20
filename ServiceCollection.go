@@ -135,6 +135,14 @@ func (s *ServiceCollection) add(serviceDescriptor ServiceDescriptor) {
 	s.Count = len(s.descriptors)
 }
 
+func (s *ServiceCollection) get(baseType reflect.Type) *ServiceDescriptor {
+	sd, ok := s.descriptors[baseType]
+	if !ok {
+		panic(fmt.Sprintf("未找到 %v 实例", baseType))
+	}
+	return &sd
+}
+
 // 移除一个 ServiceDescriptor
 func (s *ServiceCollection) remove(descriptor ServiceDescriptor) {
 	delete(s.descriptors, descriptor.BaseType)
@@ -158,7 +166,8 @@ func (s *ServiceCollection) Build() IServiceProvider {
 
 	var services IServiceProvider
 	services = &ServiceProvider{
-		descriptors: descriptors,
+		descriptors:       descriptors,
+		serviceCollection: s,
 	}
 	return services
 }

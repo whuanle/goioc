@@ -1,3 +1,3 @@
 module github.com/whuanle/goioc
 
-go 1.17
+go 1.18

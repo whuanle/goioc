@@ -3,7 +3,7 @@
 goioc 是一个基于 GO 语言编写的依赖注入框架，代码量不多，很简洁。
 
 ```bash
-go get -u https://github.com/whuanle/goioc v1.0.0
+go get -u github.com/whuanle/goioc v1.0.0
 ```
 
 

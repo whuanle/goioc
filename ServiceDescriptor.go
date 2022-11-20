@@ -19,9 +19,9 @@ type ServiceDescriptor struct {
 	// 实现对象，实例对象
 	ServiceType reflect.Type
 
-	// 已被实例化的对象，存储在内存中
-	ServiceInstance interface{}
+	// Scope 模式对象
+	ScopeInstance interface{}
 
 	// 如何实例化对象，要求返回的必须是对象的指针给接口
-	InitHandler func() interface{}
+	InitHandler func(provider IServiceProvider) interface{}
 }

@@ -7,14 +7,18 @@ import (
 
 // ServiceCollection 即 IServiceCollection 的实现
 type ServiceCollection struct {
+	// 服务描述
 	descriptors map[reflect.Type]ServiceDescriptor
 	// 当前在容器中类型数量
 	Count int
 }
 
 // 基础注入方法
-func (s *ServiceCollection) addAny(baseType reflect.Type, serviceType reflect.Type, lifetime ServiceLifetime, f func() interface{}) {
-	// 要去重
+func (s *ServiceCollection) addAny(
+	lifetime ServiceLifetime,
+	baseType reflect.Type,
+	serviceType reflect.Type,
+	f func(provider IServiceProvider) interface{}) {
 	descriptor := ServiceDescriptor{
 		Name:        serviceType.Name(),
 		BaseType:    baseType,
@@ -25,103 +29,58 @@ func (s *ServiceCollection) addAny(baseType reflect.Type, serviceType reflect.Ty
 	s.add(descriptor)
 }
 
-// 下面是实现 IServiceCollection 接口
+// 实现 IServiceCollection 接口
 
-// 获取实例化此类型的匿名函数
-func getInitHandler(t reflect.Type) func() interface{} {
-	f := func() interface{} {
+// 默认通过反射实例化对象的方式
+func getInitHandler(t reflect.Type) func(provider IServiceProvider) interface{} {
+	f := func(provider IServiceProvider) interface{} {
 		// reflect 先实例化此类型，获取了当前对象的指针，获取原始对象
 		return reflect.New(t).Interface()
 	}
 	return f
 }
 
+// 检查类型是否为接口或结构体
 func checkBaseType(t reflect.Type) {
 	if t.Kind() == reflect.Interface || t.Kind() == reflect.Struct {
 		return
 	}
-	panic(fmt.Sprintf("%t 既不是接口也不是结构体，无法注入到容器中", t))
+	panic(fmt.Sprintf("[ %t ] is not an interface or struct", t))
 }
 
-func checkServiceType(t reflect.Type) {
+// 检查是否为结构体
+func checkStructType(t reflect.Type) {
 	if t.Kind() != reflect.Struct {
-		panic(fmt.Sprintf("%t 不是结构体，无法注入到容器中", t))
+		panic(fmt.Sprintf("[ %t ] is not an struct", t))
 	}
-
 }
 
-func checkType(baseType reflect.Type, serviceType reflect.Type) {
+func (s *ServiceCollection) AddService(lifetime ServiceLifetime, t reflect.Type) {
+	checkStructType(t)
+	f := getInitHandler(t)
+	s.addAny(lifetime, t, t, f)
+}
+
+func (s *ServiceCollection) AddServiceHandler(lifetime ServiceLifetime, t reflect.Type, f func(provider IServiceProvider) interface{}) {
+	checkBaseType(t)
+	s.addAny(lifetime, t, t, f)
+}
+
+func (s *ServiceCollection) AddServiceOf(lifetime ServiceLifetime, baseType reflect.Type, serviceType reflect.Type) {
 	checkBaseType(baseType)
-	checkServiceType(serviceType)
-	if !serviceType.Implements(baseType) {
-		panic(fmt.Sprintf("%t 不实现 %t", serviceType, baseType))
-	}
-}
-
-func (s *ServiceCollection) AddScoped(t reflect.Type) {
-	checkServiceType(t)
-	f := getInitHandler(t)
-	s.addAny(t, t, Scope, f)
-}
-
-func (s *ServiceCollection) AddScopedHandler(t reflect.Type, f func() interface{}) {
-	checkServiceType(t)
-	s.addAny(t, t, Scope, f)
-}
-
-func (s *ServiceCollection) AddScopedForm(baseType reflect.Type, serviceType reflect.Type) {
-	checkType(baseType, serviceType)
+	checkStructType(serviceType)
 	f := getInitHandler(serviceType)
-	s.addAny(baseType, serviceType, Scope, f)
+	s.addAny(lifetime, baseType, serviceType, f)
 }
 
-func (s *ServiceCollection) AddScopedHandlerForm(baseType reflect.Type, serviceType reflect.Type, f func() interface{}) {
-	checkType(baseType, serviceType)
-	s.addAny(baseType, serviceType, Scope, f)
-}
-
-func (s *ServiceCollection) AddSingleton(t reflect.Type) {
-	checkServiceType(t)
-	f := getInitHandler(t)
-	s.addAny(t, t, Singleton, f)
-}
-
-func (s *ServiceCollection) AddSingletonHandler(t reflect.Type, f func() interface{}) {
-	checkServiceType(t)
-	s.addAny(t, t, Singleton, f)
-}
-
-func (s *ServiceCollection) AddSingletonForm(baseType reflect.Type, serviceType reflect.Type) {
-	checkType(baseType, serviceType)
-	f := getInitHandler(serviceType)
-	s.addAny(baseType, serviceType, Singleton, f)
-}
-
-func (s *ServiceCollection) AddSingletonHandlerForm(baseType reflect.Type, serviceType reflect.Type, f func() interface{}) {
-	checkType(baseType, serviceType)
-	s.addAny(baseType, serviceType, Singleton, f)
-}
-
-func (s *ServiceCollection) AddTransient(t reflect.Type) {
-	checkServiceType(t)
-	f := getInitHandler(t)
-	s.addAny(t, t, Transient, f)
-}
-
-func (s *ServiceCollection) AddTransientHandler(t reflect.Type, f func() interface{}) {
-	checkServiceType(t)
-	s.addAny(t, t, Transient, f)
-}
-
-func (s *ServiceCollection) AddTransientForm(baseType reflect.Type, serviceType reflect.Type) {
-	checkType(baseType, serviceType)
-	f := getInitHandler(serviceType)
-	s.addAny(baseType, serviceType, Transient, f)
-}
-
-func (s *ServiceCollection) AddTransientHandlerForm(baseType reflect.Type, serviceType reflect.Type, f func() interface{}) {
-	checkType(baseType, serviceType)
-	s.addAny(baseType, serviceType, Transient, f)
+func (s *ServiceCollection) AddServiceHandlerOf(
+	lifetime ServiceLifetime,
+	baseType reflect.Type,
+	serviceType reflect.Type,
+	f func(provider IServiceProvider) interface{}) {
+	checkBaseType(baseType)
+	checkBaseType(serviceType)
+	s.addAny(lifetime, baseType, serviceType, f)
 }
 
 // 私有方法
@@ -138,7 +97,7 @@ func (s *ServiceCollection) add(serviceDescriptor ServiceDescriptor) {
 func (s *ServiceCollection) get(baseType reflect.Type) *ServiceDescriptor {
 	sd, ok := s.descriptors[baseType]
 	if !ok {
-		panic(fmt.Sprintf("未找到 %v 实例", baseType))
+		panic(fmt.Sprintf("Type [ %t ] not found", baseType))
 	}
 	return &sd
 }
@@ -150,16 +109,13 @@ func (s *ServiceCollection) remove(descriptor ServiceDescriptor) {
 }
 
 func (s *ServiceCollection) Build() IServiceProvider {
-	// scoped
 	descriptors := make(map[reflect.Type]ServiceDescriptor)
 
-	// 复制集合中的所有对象到新的容器中，并且对每个 Scope 的对象实例化
+	// 复制集合中的 ServiceDescriptor 到新的容器中，检查
 	for i, descriptor := range s.descriptors {
-		// 单例模式提前实例化，也就是常驻内存
+		// 单例模式会被放置到全局实例管理器
 		if descriptor.Lifetime == Singleton {
-			if descriptor.ServiceInstance == nil {
-				descriptor.ServiceInstance = descriptor.InitHandler() // InitHandler 必须传递了对象指针给接口
-			}
+			registerSingletonInstance(descriptor.BaseType, descriptor.InitHandler)
 		}
 		descriptors[i] = descriptor
 	}

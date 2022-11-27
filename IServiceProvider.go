@@ -7,6 +7,6 @@ import "reflect"
 type IServiceProvider interface {
 	// GetService 获取你需要的服务实例
 	GetService(baseType reflect.Type) (*interface{}, error)
-	// Dispose 释放当前容器的所有对象
+	// Dispose 释放当前容器的 Scope 对象
 	Dispose()
 }

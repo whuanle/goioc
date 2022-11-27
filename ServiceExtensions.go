@@ -9,11 +9,17 @@ func Get[T any](provider IServiceProvider) interface{} {
 	t := reflect.TypeOf((*T)(nil)).Elem()
 
 	if t.Kind() == reflect.Interface {
-		v := getInterface[T](provider, t)
-		return v
+		obj, err := provider.GetService(t)
+		if err != nil {
+			panic(err)
+		}
+		return obj
 	} else if t.Kind() == reflect.Struct {
-		v := getStruct[T](provider, t)
-		return v
+		obj, err := provider.GetService(t)
+		if err != nil {
+			panic(err)
+		}
+		return obj
 	}
 	return nil
 }
@@ -29,7 +35,7 @@ func GetI[T interface{}](provider IServiceProvider) T {
 }
 
 // GetS 根据结构体获取对象
-func GetS[T struct{}](provider IServiceProvider) *T {
+func GetS[T interface{} | struct{}](provider IServiceProvider) *T {
 	t := reflect.TypeOf((*T)(nil)).Elem()
 	if t.Kind() != reflect.Struct {
 		return nil

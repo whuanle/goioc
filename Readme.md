@@ -1,26 +1,40 @@
 # goioc
 
+## goioc 介绍
+
 goioc 是一个基于 GO 语言编写的依赖注入框架，代码量不多，很简洁。
 
 ```bash
-go get -u github.com/whuanle/goioc v1.0.0
+go get -u github.com/whuanle/goioc v2.0.0
 ```
 
 
 
-### 接口注入
+线程安全，多个线程同时获取对象；
 
-有以下接口定义：
+延迟加载，在需要的时候才会实例化对象；
 
-```golang
+支持自定义实例化对象；
+
+支持结构体字段注入；
+
+
+
+### 快速上手
+
+定义接口：
+
+```go
 type IAnimal interface {
 	Println(s string)
 }
 ```
 
-接口的实现：
 
-```golang
+
+实现接口：
+
+```go
 type Dog struct {
 }
 func (my Dog) Println(s string) {
@@ -30,16 +44,393 @@ func (my Dog) Println(s string) {
 
 
 
-当使用依赖注入框架时，我们可以将接口和实现分开，放到两个模块中。
-
-
-
-首先创建 IServiceCollection 容器
+依赖注入以及使用：
 
 ```go
-	// 创建容器
-	var collection IServiceCollection = &ServiceCollection{}
+// 注册容器
+var sc goioc.IServiceCollection = &ServiceCollection{}
+// 注入服务
+goioc.AddServiceOf[IAnimal, Dog](sc, goioc.Scope)
+// 构建提供器
+p := sc.Build()
+// 获取服务
+obj := goioc.Get[IAnimal](p)
 ```
+
+
+
+
+
+### 接口介绍
+
+`IServiceCollection` 是一个容器接口，通过此接口，将需要进行依赖注入的对象注册到容器中。
+
+`IServiceProvider`  是一个服务提供器，当服务注册到容器后，构建一个服务提供器，`IServiceProvider` 可以管理服务的生命周期以及提供服务。
+
+`IDispose` 接口用于声明此对象在 `IServiceProvider` 结束时，需要执行接口释放对象。
+
+```go
+// IDispose 释放接口
+type IDispose interface {
+	// Dispose 释放资源
+	Dispose()
+}
+```
+
+
+
+除此之外，goioc 中还定义了部分扩展函数，如泛型注入等。
+
+
+
+## 使用 goioc
+
+### 如何使用
+
+注入的服务有两种形式，第一种是 `B:A`，即 B 实现了 A，使用的时候获取 A ；第二种是注入 B，使用的时候获取 B。
+
+```go
+// 第一种
+AddServiceOf[A,B]()
+// 第二种
+AddService[B]()
+```
+
+
+
+定义一个接口：
+
+```golang
+type IAnimal interface {
+	Println(s string)
+}
+```
+
+实现这个接口：
+
+```golang
+type Dog struct {
+	Id int
+}
+
+func (my Dog) Println(s string) {
+	fmt.Println(s)
+}
+
+```
+
+
+
+当使用依赖注入框架时，我们可以将接口和实现分开，甚至放到两个模块中，可以随时替换实现。
+
+
+
+注册服务和获取服务的代码示例如下：
+
+```go
+func Demo() {
+	sc := &ServiceCollection{}
+	goioc.AddServiceOf[IAnimal, Dog](sc, goioc.Scope)
+	p := sc.Build()
+	animal := goioc.GetI[IAnimal](p)
+	animal.Println("test")
+}
+```
+
+
+
+下面讲解编码过程。
+
+
+
+首先创建 IServiceCollection 容器，容器中可以注册服务。
+
+```go
+sc := &ServiceCollection{}
+```
+
+
+
+然后通过接口注入服务：
+
+```go
+goioc.AddServiceOf[IAnimal, Dog](sc, goioc.Scope)
+```
+
+> 这个函数是泛型方法。如果不使用泛型，则注入过程麻烦得多。
+
+
+
+注册完毕后，开始构建通过器：
+
+```go
+p := sc.Build()
+```
+
+
+
+然后获取服务：
+
+```go
+	animal := goioc.GetI[IAnimal](p)
+	animal.Println("test")
+```
+
+
+
+### 生命周期
+
+goioc 中定义了三个生命周期：
+
+```go
+const (
+	Transient ServiceLifetime = iota
+	Scope
+	Singleton
+)
+```
+
+
+
+`Transient`：瞬时模式，每次获取到的都是新的对象；
+
+`Scope`：作用域模式，同一个 Provider 中获取到的是同一个对象。
+
+`Singleton`：单例模式，同一个 ServiceCollection 获取到的是同一个对象，也就是所有 Provider 获取到的都是同一个对象。
+
+如果是单例模式(Singleton)，那么无论多少次 Build，对象始终是同一个：
+
+
+
+在注册服务的时候，需要注明对象生命周期。
+
+```go
+goioc.AddServiceOf[IAnimal, Dog](sc, goioc.Scope)
+```
+
+
+
+生命周期为 scope 的注入，同一个 Provider 中，获取到的对象是一样的。
+
+```go
+	sc := &ServiceCollection{}
+	goioc.AddServiceOf[IAnimal, Dog](sc, goioc.Scope)
+	p := sc.Build()
+	animal1 := goioc.GetI[IAnimal](p)
+	if animal1 == nil {
+		t.Errorf("service is nil!")
+	}
+	animal1.Println("test")
+
+	animal2 := goioc.GetI[IAnimal](p)
+	if animal2 == nil {
+		t.Errorf("service is nil!")
+	}
+
+	if animal1 != animal2 {
+		t.Errorf("animal1 != animal2")
+	}
+```
+
+
+
+实例一：
+
+```go
+	sc := &ServiceCollection{}
+	goioc.AddServiceHandler[Dog](sc, goioc.Singleton, func(provider goioc.IServiceProvider) interface{} {
+		return &Dog{
+			Id: 2,
+		}
+	})
+
+	p := sc.Build()
+	a := goioc.GetI[IAnimal](p)
+
+	if v := a.(*Dog); v == nil {
+		t.Errorf("service is nil!")
+	}
+	v := a.(*Dog)
+	if v.Id != 2 {
+		t.Errorf("Life cycle error")
+	}
+	v.Id = 3
+	// 重复获取的必定是同一个对象
+	aa := goioc.GetI[IAnimal](p)
+	v = aa.(*Dog)
+	if v.Id != 3 {
+		t.Errorf("Life cycle error")
+	}
+
+	// 重新构建的，scope 不是同一个对象
+	pp := sc.Build()
+	aaa := goioc.GetI[IAnimal](pp)
+	v = aaa.(*Dog)
+	if v.Id != 2 {
+		t.Errorf("Life cycle error")
+	}
+```
+
+
+
+实例二：
+
+```go
+	sc := &ServiceCollection{}
+    goioc.AddServiceHandlerOf[IAnimal, Dog](sc, goioc.Scope, func(provider goioc.IServiceProvider) interface{} {
+		return &Dog{
+			Id: 3,
+		}
+	})
+
+	p := sc.Build()
+	b := goioc.GetS[Dog](p)
+	if b.Id != 2 {
+		t.Errorf("Life cycle error")
+	}
+
+	b.Id = 3
+
+	bb := goioc.GetS[Dog](p)
+	if b.Id != bb.Id {
+		t.Errorf("Life cycle error")
+	}
+	ppp := sc.Build()
+
+	bbb := goioc.GetS[Dog](ppp)
+	if b.Id != bbb.Id {
+		t.Errorf("Life cycle error")
+	}
+```
+
+
+
+
+
+### 实例化
+
+由开发者决定如何实例化一个对象。
+
+主要由注册形式决定，有四个泛型函数实现注册服务：
+
+```go
+// AddService 注册对象
+func AddService[T any](con IServiceCollection, lifetime ServiceLifetime)
+
+// AddServiceHandler 注册对象，并自定义如何初始化实例
+func AddServiceHandler[T any](con IServiceCollection, lifetime ServiceLifetime, f func(provider IServiceProvider) interface{})
+
+// AddServiceOf 注册对象，注册接口或父类型及其实现，serviceType 必须实现了 baseType
+func AddServiceOf[I any, T any](con IServiceCollection, lifetime ServiceLifetime)
+
+// AddServiceHandlerOf 注册对象，注册接口或父类型及其实现，serviceType 必须实现了 baseType，并自定义如何初始化实例
+func AddServiceHandlerOf[I any, T any](con IServiceCollection, lifetime ServiceLifetime, f func(provider IServiceProvider) interface{})
+```
+
+
+
+`AddService[T any]`：只注册可被实例化的对象：
+
+```go
+AddService[T any]
+```
+
+```go
+goioc.AddService[Dog](sc, goioc.Scope)
+```
+
+
+
+`AddServiceHandler` 注册一个接口或结构体，自定义实例化。
+
+`func(provider goioc.IServiceProvider) interface{}` 函数会在实例化对象时执行。
+
+```go
+	goioc.AddServiceHandler[Dog](sc, goioc.Scope, func(provider goioc.IServiceProvider) interface{} {
+		return &Dog{
+			Id: 1,
+		}
+	})
+```
+
+
+
+在实例化时，如果这个对象还依赖其他服务，则可以通过 `goioc.IServiceProvider` 来获取其他依赖。
+
+```go
+	goioc.AddServiceHandler[Dog](sc, goioc.Scope, func(provider goioc.IServiceProvider) interface{} {
+		other := goioc.GetI[IAnimal](provider)
+		if other != nil {
+			return other
+		}
+		return &Dog{
+			Id: 1,
+		}
+	})
+```
+
+```
+	goioc.AddServiceHandler[Dog](sc, goioc.Scope, func(provider goioc.IServiceProvider) interface{} {
+		config := goioc.GetI[Config](provider)
+		if config.Enable == false
+		return &Dog{
+			Id: 1,
+		}
+	})
+```
+
+![image-20221127155120030](images/image-20221127155120030.png)
+
+
+
+
+
+### 获取对象
+
+前面提到，我们可以注入 `[A,B]`，或者 `[B]`。
+
+那么获取的时候就有三种函数：
+
+```go
+// Get 获取对象
+func Get[T any](provider IServiceProvider) interface{} 
+
+// GetI 根据接口获取对象
+func GetI[T interface{}](provider IServiceProvider) T 
+
+// GetS 根据结构体获取对象
+func GetS[T interface{} | struct{}](provider IServiceProvider) *T 
+```
+
+
+
+`Get[T any]` 获取接口或结构体，返回 `interface{} `。
+
+`GetI[T interface{}]` 获取的是一个接口实例。
+
+` GetS[T interface{} | struct{}]` 获取的是一个结构体实例。
+
+
+
+以上三种方式，返回的都是对象的引用，即指针。
+
+```go
+	sc := &ServiceCollection{}
+	goioc.AddService[Dog](sc, goioc.Scope)
+	goioc.AddServiceOf[IAnimal, Dog](sc, goioc.Scope)
+	p := sc.Build()
+
+	a := goioc.Get[IAnimal](p)
+	b := goioc.Get[Dog](p)
+	c := goioc.GetI[IAnimal](p)
+	d := goioc.GetS[Dog](p)
+```
+
+![image-20221127155956156](images/image-20221127155956156.png)
+
+
+
+
 
 
 
@@ -143,61 +534,46 @@ func (my Dog) Println(s string) {
 
 结构体中的字段，可以自动注入和转换实例。
 
-如结构体 Animal 的定义，其使用了其它结构体，goioc 可以自动注入 Animal 对应字段。要被注入的字段必须是接口或者结构体！
+如结构体 Animal 的定义，其使用了其它结构体，goioc 可以自动注入 Animal 对应字段，要被注入的字段必须是接口或者结构体。
 
 ```go
-type IAnimal interface {
-	Println(s string)
-}
-
-type Dog struct {
-}
-func (my Dog) Println(s string) {
-	fmt.Println(s)
-}
-
 // 结构体中包含了其它对象
 type Animal struct {
-	Dog IAnimal `injection:"true"`
+	Dog IAnimal `ioc:"true"`
 }
 ```
 
-> 要对需要自动注入的字段设置 tag 中包含`injection:"true"` 才会生效。
+> 要对需要自动注入的字段设置 tag 中包含`ioc:"true"` 才会生效。
 
-依赖注入的实例代码如下：
+
+
+示例代码：
 
 ```go
-	// 获取 reflect.Type
-	imy := reflect.TypeOf((*IAnimal)(nil)).Elem()
-	my := reflect.TypeOf((*Dog)(nil)).Elem()
-	animalType := reflect.TypeOf((*Animal)(nil)).Elem()
+	sc := &ServiceCollection{}
+	goioc.AddServiceHandlerOf[IAnimal, Dog](sc, goioc.Scope, func(provider goioc.IServiceProvider) interface{} {
+		return &Dog{
+			Id: 666,
+		}
+	})
+	goioc.AddService[Animal](sc, goioc.Scope)
 
-	// 创建容器
-	var collection IServiceCollection = &ServiceCollection{}
-	collection.AddScopedForm(imy, my)
-	collection.AddScoped(animalType)
-
-	// 构建服务 Provider
-	serviceProvider := collection.Build()
-
-	// 获取对象
-	// *interface{}
-	obj, err := serviceProvider.GetService(animalType)
-	if err != nil {
-		t.Error(err)
+	p := sc.Build()
+	a := goioc.GetS[Animal](p)
+	if dog := a.Dog.(*Dog); dog.Id != 666 {
+		t.Errorf("service is nil!")
 	}
-
-	// *interface{} -> Animal
-	fmt.Println(*obj)
-	animal := (*obj).(*Animal)
-	animal.Dog.Println("测试2")
 ```
+
+
 
 
 
 goioc 可以自动给你的结构体字段进行自动依赖注入。
 
-> 注意，如果 obj 要转换为接口，则是使用：
+> 注意，goioc 的字段注入转换逻辑是这样的。
+>
+> 如果 obj 要转换为接口，则是使用：
 >
 > ```
 > 	animal := (*obj).(IAnimal)
@@ -213,37 +589,65 @@ goioc 可以自动给你的结构体字段进行自动依赖注入。
 
 
 
-### 生命周期
+## 反射形式使用 goioc
 
-对象的生命周期有三个：
+### 如何使用
+
+goioc 的原理是反射，ioc 使用了大量的反射机制实现依赖注入，但是因为 Go 的反射比较难用，导致操作十分麻烦，因此使用泛型包装一层可以降低使用难度。
+
+当然，也可以直接使用原生的反射方式进行依赖注入。
+
+
+
+首先反射通过反射获取 `reflect.Type`。
 
 ```go
-const (
-	Transient ServiceLifetime= iota
-	Scope
-	Singleton
-)
+	// 获取 reflect.Type
+	imy := reflect.TypeOf((*IAnimal)(nil)).Elem()
+	my := reflect.TypeOf((*Dog)(nil)).Elem()
 ```
 
-如果是单例模式，则在同一个容器中，无论多少次构建 Provider，以及使用 GetService 获取对象，每次获取到的都是同一个对象。
 
-如果是 Scope 模式，ServiceCollection 每次 Build 时，同一个 serviceProvider 获取到的对象是同一个。
 
-如果是 Transient 模式，每次获取到的对象都是新的。
+依赖注入：
+
+```go
+	// 创建容器
+	sc := &ServiceCollection{}
+
+	// 注入服务，生命周期为 scoped
+	sc.AddServiceOf(goioc.Scope, imy, my)
+
+	// 构建服务 Provider
+	serviceProvider := sc.Build()
+```
+
+
+
+获取服务以及进行类型转换：
+
+```go
+	// 获取对象
+	// *interface{} = &Dog{}，因此需要处理指针
+	obj, err := serviceProvider.GetService(imy)
+	animal := (*obj).(IAnimal)
+```
+
+
 
 示例：
 
 ```go
 	imy := reflect.TypeOf((*IAnimal)(nil)).Elem()
 	my := reflect.TypeOf((*Dog)(nil)).Elem()
-	var collection IServiceCollection = &ServiceCollection{}
-	collection.AddScopedForm(imy, my)
-	serviceProvider := collection.Build()
+	var sc IServiceCollection = &ServiceCollection{}
+	sc.AddServiceOf(goioc.Scope,imy, my)
+	p := sc.Build()
 
 	// 获取对象
 	// *interface{} = &Dog{}，因此需要处理指针
-	obj1, _ := serviceProvider.GetService(imy)
-	obj2, _ := serviceProvider.GetService(imy)
+	obj1, _ := p.GetService(imy)
+	obj2, _ := p.GetService(imy)
 
 	fmt.Printf("obj1 = %p,obj2 = %p\r\n", (*obj1).(*Dog), (*obj2).(*Dog))
 	if fmt.Sprintf("%p",(*obj1).(*Dog)) != fmt.Sprintf("%p",(*obj2).(*Dog)){
@@ -252,80 +656,6 @@ const (
 ```
 
 
-
-如果是单例模式(Singleton)，那么无论多少次 Build，对象始终是同一个：
-
-```go
-// 字段是接口
-type Animal1 struct {
-	Dog IAnimal `injection:"true"`
-}
-```
-
-```go
-	// Singleton
-	t1 := reflect.TypeOf((*Animal1)(nil)).Elem()
-	collection.AddSingleton(t1)
-
-	serviceProvider1 := collection.Build()
-	v1, _ := serviceProvider1.GetService(t1)
-
-	serviceProvider2 := collection.Build()
-	v2, _ := serviceProvider2.GetService(t1)
-
-	fmt.Printf("v1 = %p,v2 = %p\r\n", (*v1).(*Animal1), (*v2).(*Animal1))
-	if fmt.Sprintf("%p", (*v1).(*Animal1)) != fmt.Sprintf("%p", (*v2).(*Animal1)) {
-		t.Error("两个对象不是同一个")
-	}
-```
-
-输出结果：
-
-```
-v1 = 0xc0000886c0,v2 = 0xc0000886c0
-```
-
-
-
-
-
-### 自定义实例化过程
-
-默认情况下，注入的结构体是直接实例化的，如：
-
-```go
-dog := &Dog{
-}
-```
-
-如果结构体有字段需要注入，则：
-
-```go
-animal := &Animal{
-		Dog: &Dog{
-		},
-	}
-```
-
-
-
-如果你想自定义实例化过程，则可以注入一个匿名函数：
-
-```go
-	// 获取 reflect.Type
-	imy := reflect.TypeOf((*IAnimal)(nil)).Elem()
-	my := reflect.TypeOf((*Dog)(nil)).Elem()
-
-	// 创建容器
-	var collection IServiceCollection = &ServiceCollection{}
-
-	// 注入服务，生命周期为 scoped
-	collection.AddScopedHandlerForm(imy, my,func()interface{}{
-		// 你自己的实例化代码
-		return &Dog{
-		}
-	})
-```
 
 
 
@@ -336,17 +666,17 @@ animal := &Animal{
 ```go
 // 字段是接口
 type Animal1 struct {
-	Dog IAnimal `injection:"true"`
+	Dog IAnimal `ioc:"true"`
 }
 
 // 字段是结构体
 type Animal2 struct {
-	Dog Dog `injection:"true"`
+	Dog Dog `ioc:"true"`
 }
 
 // 字段是结构体指针
 type Animal3 struct {
-	Dog *Dog `injection:"true"`
+	Dog *Dog `ioc:"true"`
 }
 ```
 
@@ -360,11 +690,11 @@ type Animal3 struct {
 	my := reflect.TypeOf((*Dog)(nil)).Elem()
 
 	// 创建容器
-	var collection IServiceCollection = &ServiceCollection{}
+    p := &ServiceCollection{}
 
 	// 注入服务，生命周期为 scoped
-	collection.AddScopedForm(imy, my)
-	collection.AddScoped(my)
+	p.AddServiceOf(goioc.Scope,imy, my)
+    p.AddService(goioc.Scope, my)
 ```
 
 
@@ -376,20 +706,20 @@ type Animal3 struct {
 	t2 := reflect.TypeOf((*Animal2)(nil)).Elem()
 	t3 := reflect.TypeOf((*Animal3)(nil)).Elem()
 
-	collection.AddScoped(t1)
-	collection.AddScoped(t2)
-	collection.AddScoped(t3)
+	p.Ad(t1)
+	p.AddServiceOf(goioc.Scope,t2)
+	p.AddServiceOf(goioc.Scope,t3)
 ```
 
 然后愉快地获取这些对象实例：
 
 ```go
 	// 构建服务 Provider
-	serviceProvider := collection.Build()
+	p := collection.Build()
 
-	v1, _ := serviceProvider.GetService(t1)
-	v2, _ := serviceProvider.GetService(t2)
-	v3, _ := serviceProvider.GetService(t3)
+	v1, _ := p.GetService(t1)
+	v2, _ := p.GetService(t2)
+	v3, _ := p.GetService(t3)
 
 	fmt.Println(*v1)
 	fmt.Println(*v2)
@@ -428,10 +758,10 @@ type Animal3 struct {
 	my := reflect.TypeOf((*Dog)(nil)).Elem()
 
 	// 创建容器
-	var collection IServiceCollection = &ServiceCollection{}
+    sc := &ServiceCollection{}
 
 	// 注入服务，生命周期为 scoped
-	collection.AddScopedForm(imy, my)
+	sc.AddServiceOf(goioc.Scope,imy, my)
 ```
 
 此时，注册的服务是 IAnimal，你只能通过 IAnimal 获取实例，无法通过 Dog 获取实例。
@@ -440,8 +770,8 @@ type Animal3 struct {
 
 ```go
 	// 注入服务，生命周期为 scoped
-	collection.AddScopedForm(imy, my)
-	collection.AddScoped(my)
+	p.AddServiceOf(goioc.Scope,imy, my)
+	p.AddService(my)
 ```
 
 > 如果是结构体字段，则使用 IAnimal、Dog、`*Dog` 的形式都可以。
